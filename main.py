@@ -29,14 +29,58 @@ def generate_random_binary_tree_hdf5(nodes_count, filename):
     with h5py.File(filename, 'w') as f:
         root_group = f.create_group('root')
         node_queue = [(root_group, 0)]
-        node_count = 0
+        node_count = 1
 
-        while node_queue and node_count < nodes_count:
+        while node_queue or node_count < nodes_count:
+            if node_queue:
+                current_group, depth = node_queue.pop(0)
+                value = random.randint(0, 1000)
+                current_group.attrs['value'] = value
+
+                if node_count < nodes_count:
+                    left_group = current_group.create_group('left')
+                    node_queue.append((left_group, depth + 1))
+                    node_count += 1
+
+                if node_count < nodes_count:
+                    right_group = current_group.create_group('right')
+                    node_queue.append((right_group, depth + 1))
+                    node_count += 1
+
+    print(f"Сгенерировано случайное бинарное дерево с {nodes_count} вершинами и сохранено в файл '{filename}'.")
+
+
+@count_memory_and_speed
+def generate_flat_binary_tree_hdf5(nodes_count, filename):
+    values = []
+
+    print(f"Введите значения для {nodes_count} узлов дерева:")
+
+    for i in range(nodes_count):
+        while True:
+            value = input(f"Значение для узла {i + 1}: ")
+            try:
+                value = float(value)  # Проверяем, что значение является числом
+                values.append(value)
+                break
+            except ValueError:
+                print("Пожалуйста, введите корректное числовое значение.")
+
+    with h5py.File(filename, 'w') as f:
+        root_group = f.create_group('root')
+        node_queue = [(root_group, 0)]
+        node_values_iter = iter(values)
+        node_count = 1  # Начинаем с одного узла - корня
+
+        while node_queue and node_count <= nodes_count:
             current_group, depth = node_queue.pop(0)
-            value = random.randint(0, 1000)
-            current_group.attrs['value'] = value
-            node_count += 1
+            try:
+                value = next(node_values_iter)
+                current_group.attrs['value'] = value
+            except StopIteration:
+                break
 
+            # Check if we should add left and right children
             if node_count < nodes_count:
                 left_group = current_group.create_group('left')
                 node_queue.append((left_group, depth + 1))
@@ -47,109 +91,59 @@ def generate_random_binary_tree_hdf5(nodes_count, filename):
                 node_queue.append((right_group, depth + 1))
                 node_count += 1
 
-    print(
-        f"Сгенерировано случайное бинарное дерево с {nodes_count} "
-        f"вершинами и сохранено в файл '{filename}'."
-    )
+    print(f"Создано бинарное дерево с {nodes_count} вершинами и сохранено в файл '{filename}'.")
 
-
-@count_memory_and_speed
-def generate_user_defined_binary_tree_hdf5(nodes_count, filename):
-    if nodes_count > 10:
-        print("Ошибка: количество вершин не должно превышать 10.")
-        return
-
-    with h5py.File(filename, 'w') as f:
-        root_group = f.create_group('root')
-        node_queue = [(root_group, 0)]
-        node_count = 0
-
-        while node_queue and node_count < nodes_count:
-            current_group, depth = node_queue.pop(0)
-            value = int(input(f"Введите значение для узла {node_count + 1}: "))
-            current_group.attrs['value'] = value
-            node_count += 1
-
-            if node_count < nodes_count:
-                choice = input(
-                    "Создать левый дочерний "
-                    f"узел для узла {node_count}? (y/n):"
-                )
-                if choice.lower() == 'y':
-                    left_group = current_group.create_group('left')
-                    node_queue.append((left_group, depth + 1))
-
-            if node_count < nodes_count:
-                choice = input(
-                    "Создать правый дочерний "
-                    f"узел для узла {node_count}? (y/n): "
-                )
-                if choice.lower() == 'y':
-                    right_group = current_group.create_group('right')
-                    node_queue.append((right_group, depth + 1))
-
-    print(
-        f"Создано бинарное дерево с {nodes_count} "
-        f"вершинами и сохранено в файл '{filename}'."
-    )
 
 
 @count_memory_and_speed
 def print_tree_hdf5(file_path):
-    def display_node(group, level=0, is_left=None):
-        if 'value' in group.attrs:
-            value = group.attrs['value']
-            print('    ' * level, end='')
-            if is_left is None:
-                prefix = ''
-            elif is_left:
-                prefix = '└── '
-            else:
-                prefix = '├── '
-            print(prefix + str(value))
+    def display_node(group, level=0, is_last=False):
+        indent = "│   " * (level - 1) + ("└── " if is_last else "├── ") if level > 0 else ""
+        value = group.attrs['value'] if 'value' in group.attrs else "<empty>"
+        print(indent + str(value))
 
-        if 'left' in group:
-            display_node(group['left'], level + 1, is_left=True)
-        if 'right' in group:
-            display_node(group['right'], level + 1, is_left=False)
+        children = sorted(list(group.keys()), key=lambda x: x == 'right')
+        for i, child_name in enumerate(children):
+            child_group = group[child_name]
+            last_child = i == len(children) - 1
+            display_node(child_group, level + 1, last_child)
 
     def count_nodes(group):
         count = 1
-        if 'left' in group:
-            count += count_nodes(group['left'])
-        if 'right' in group:
-            count += count_nodes(group['right'])
+        for child_name in group:
+            count += count_nodes(group[child_name])
         return count
 
     with h5py.File(file_path, 'r') as f:
         root_group = f['root']
         total_nodes = count_nodes(root_group)
-        if total_nodes > 20:
-            find_max_non_leaf_value(file_path)
-        else:
-            display_node(root_group)
+        display_node(root_group)
+
 
 
 @count_memory_and_speed
 def find_max_non_leaf_value(file_path):
     def traverse(group):
         max_value = float('-inf')
-        if 'value' in group.attrs:
-            max_value = max(max_value, group.attrs['value'])
-        if 'left' in group or 'right' in group:  # Узел не является листом
-            if 'left' in group:
-                max_value = max(max_value, traverse(group['left']))
-            if 'right' in group:
-                max_value = max(max_value, traverse(group['right']))
+        is_internal = 'left' in group or 'right' in group
+        if 'value' in group.attrs and is_internal:
+            value = group.attrs['value']
+            try:
+                numeric_value = float(value)
+                max_value = max(max_value, numeric_value)
+            except ValueError:
+                pass  # Пропускаем строковые значения, если они недопустимы для сравнения
+        if 'left' in group:
+            max_value = max(max_value, traverse(group['left']))
+        if 'right' in group:
+            max_value = max(max_value, traverse(group['right']))
         return max_value
 
     with h5py.File(file_path, 'r') as f:
         root_group = f['root']
         max_value = traverse(root_group)
-        print(
-            "Максимальное значение среди внутренних вершин дерева:",
-            max_value
-        )
+        print("Максимальное значение среди внутренних вершин дерева:", max_value)
+
 
 
 @count_memory_and_speed
@@ -203,17 +197,13 @@ def main():
         elif choice == 2:
             generate_and_save()
         elif choice == 3:
-            hdf5_filename = input(
-                "Введите название HDF5 файла (с расширением .h5): "
-            )
-            txt_filename = input(
-                "Введите название текстового файла (с расширением .txt): "
-            )
+            hdf5_filename = input("Введите название HDF5 файла (с расширением .h5): ")
+            txt_filename = input("Введите название текстового файла (с расширением .txt): ")
             convert_hdf5_to_txt(hdf5_filename, txt_filename)
         elif choice == 4:
             n = int(input("Количество вершин (не более 10): "))
             filename = input("Введите название файла (с расширением .h5): ")
-            generate_user_defined_binary_tree_hdf5(n, filename)
+            generate_flat_binary_tree_hdf5(n, filename)
         elif choice == 5:
             break
         else:
